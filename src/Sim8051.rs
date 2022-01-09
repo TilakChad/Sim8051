@@ -1,3 +1,4 @@
+use std::str::FromStr;
 
 // Memory emulation of 8051 -> Partial emulation + simulation
 pub struct RegisterBank<'a>
@@ -60,6 +61,7 @@ impl InternalMemory
 }
 
 // Do pattern matching
+#[derive(Debug)]
 pub enum IRegs
 {
     // Non bit adderssable
@@ -72,6 +74,8 @@ pub enum IRegs
     IP
 }
 
+
+#[derive(Debug)]
 pub enum Ports
 {
     P0,
@@ -80,6 +84,7 @@ pub enum Ports
     P3
 }
 
+#[derive(Debug)]
 pub enum SFR
 {
     Reg(IRegs),
@@ -128,6 +133,23 @@ fn sfr_addr(sfr : SFR) -> u8
                 IRegs::DPTR => 0x82, // Returning only the lower order byte .. guess the rest yourself
                 IRegs::SP   => 0x81
             }
+        }
+    }
+}
+
+impl FromStr for SFR {
+    type Err = ();
+
+    fn from_str(input : &str) -> Result<SFR,Self::Err> {
+        match input {
+            "P0"     => Ok(SFR::Port(Ports::P0)),
+            "P1"     => Ok(SFR::Port(Ports::P1)),
+            "P2"     => Ok(SFR::Port(Ports::P2)),
+            "P3"     => Ok(SFR::Port(Ports::P3)),
+            "ACC"    => Ok(SFR::Reg(IRegs::ACC)),
+            "B"      => Ok(SFR::Reg(IRegs::B)),
+            "PSW"    => Ok(SFR::Reg(IRegs::PSW)),
+            _        => Err(())
         }
     }
 }

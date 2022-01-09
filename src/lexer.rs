@@ -4,6 +4,7 @@ use std::io::Read;
 // Lets work in regex for tokenizing
 use crate::Sim8051;
 
+#[derive(Debug)]
 enum TokenType
 {
     ID(String),
@@ -18,6 +19,7 @@ enum TokenType
 }
 
 // It will only return the token for now .. More thing to be done on the parser side from here
+#[derive(Debug)]
 struct Token {
     token : TokenType,
     len : usize
@@ -139,21 +141,6 @@ impl Tokenizer
     {
         let mut str = self.parse_id();
         let mut token : Option<Token> = None;
-
-        // if let Some(y) = str
-        // {
-        //     // advance the iterator
-        //     let ptr = self.src.chars().skip(self.pos + y.len).peekable();
-        //     token = match ptr.peek() {
-        //         None    => None,
-        //         Some(z) => {
-
-        //             None
-        //         }
-        //     }
-        // }
-        // None;
-
         // Rewrite
         token = match str {
             None      => None,
@@ -163,7 +150,7 @@ impl Tokenizer
                     match ptr.peek() {
                         None     => None,
                         Some(ch) => {
-                            if ch == &';' {
+                            if *ch == ':' {
                                 id.push(':');
                                 Some(Token{
                                     token : TokenType::LABEL(id),
@@ -181,7 +168,84 @@ impl Tokenizer
         };
        token
     }
+
+    pub fn parse_bitaddr(&self) -> Option<Token>
+    {
+        // Its syntax is something followed by dot and then followed by a single number .. Nothing more
+        use std::str::FromStr;
+        let addressable = self.parse_id();
+        let mut token = None;
+        token = match addressable {
+            None      => None,
+            Some(tok) => match tok.token {
+                TokenType::ID(str)  => {
+                    let mut ptr = self.src.chars().skip(self.pos+tok.len).peekable();
+                    match ptr.peek() {
+                        None    => None,
+                        Some(z) => {
+                            if *z == '.' {
+                                ptr.next();
+                                // Continue parsing toward a number
+                                if let Some(ch) = ptr.next() {
+                                    println!("Values are {} and {}.",ch as u8,'0' as u8);
+                                    let var = ch as u8 - '0' as u8;
+                                    if var < 10 {
+                                        Some(Token {
+                                            token : TokenType::BIT_ADDR(Sim8051::SFR::from_str(&str).expect("Not a bitaddressable variable") ,var),
+                                            len   : tok.len + 2
+                                        })
+                                    }
+                                    else
+                                    {
+                                        None
+                                    }
+                                }
+                                else
+                                {
+                                    None
+                                }
+
+
+                            }
+                            else
+                            {
+                                None
+                            }
+                        }
+                    }
+                }
+                _ => None
+            }
+        };
+        token
+    }
+
+    pub fn consume_comma(&mut self) -> bool    {
+        let ptr = self.src.chars().skip(self.pos).next();
+        match ptr
+        {
+            None     => false, // throw some kind of error here
+            Some(ch) => {
+                if ch == ',' {
+                    self.pos += 1;
+                    return true
+                }
+                false
+            }
+        }
+    }
+
+    pub fn consume_newlines(&mut self) -> bool {
+        let ptr     = self.src.chars().skip(self.pos);
+        let count  =  ptr.take_while(|x| x.is_ascii_whitespace()).count();
+        self.pos    = self.pos + count;
+        match count {
+            0 => false,
+            _ => true
+        }
+    }
 }
+
 pub fn nothing()
 {
     println!("Nothing here bakaa...");
@@ -259,4 +323,18 @@ pub fn string_handling()
         println!("From loop : {} {}",i.0,i.1);
     }
 
+    // Parse tests
+    let mut labeltest = Tokenizer {
+        src : String::from("P2.1 a,b"),
+        pos : 0
+    };
+
+    match labeltest.parse_bitaddr()
+    {
+        None    => println!("Failed to parse given token "),
+        Some(z) => println!("Found some token :-> {:?}.",z)
+    }
+
+    // let f = TokenType::BIT_ADDR(Sim8051::SFR::Port(Sim8051::Ports::P0),3);
+    // println!("In Debug format {:?}.",f);
 }

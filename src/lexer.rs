@@ -21,13 +21,21 @@ pub enum TokenType {
 // It will only return the token for now .. More thing to be done on the parser side from here
 #[derive(Debug)]
 pub struct Token {
-    token: TokenType,
-    len: usize,
+    pub token: TokenType,
+    pub len: usize,
 }
 
 pub struct Tokenizer {
     pub src: String,
     pub pos: usize,
+}
+
+impl Default for Tokenizer {
+    fn default() -> Tokenizer {
+        Tokenizer{ src : String::new(),
+                   pos : 0
+        }
+    }
 }
 
 impl Tokenizer {
@@ -126,6 +134,41 @@ impl Tokenizer {
         token
     }
 
+    pub fn parse_all_as_id(&self) -> Option<Token> {
+        let count = self
+            .src
+            .chars()
+            .skip(self.pos)
+            .take_while(|x| x.is_ascii_whitespace())
+            .count();
+
+        let mut len = 0;
+        let mut ptr = self
+            .src
+            .chars()
+            .skip(self.pos+count)
+            .peekable();
+
+        let specials = vec!['.','@','#',':'];
+        if let Some(y) = ptr.peek() {
+            if !(y.is_ascii_alphanumeric() || specials.contains(&y)) {
+                return None;
+            }
+        } else {
+            return None;
+        }
+        let done         = ptr.take_while(|x| x.is_ascii_alphanumeric() || specials.contains(&x));
+        let buf : String = done.collect();
+
+        len = buf.len()+count;
+
+        return Some(Token{
+            token : TokenType::ID(buf),
+            len
+        });
+    }
+
+
     // try parsing as id first
     pub fn parse_id(&self) -> Option<Token> {
         // First letter should be alphabetic
@@ -134,6 +177,7 @@ impl Tokenizer {
             .chars()
             .skip(self.pos)
             .skip_while(|x| x.is_ascii_whitespace());
+
         if let Some(y) = ptr.next() {
             if !y.is_ascii_alphabetic() {
                 return None;
@@ -360,14 +404,32 @@ pub fn string_handling() {
     // let f = TokenType::BIT_ADDR(Sim8051::SFR::Port(Sim8051::Ports::P0),3);
     // println!("In Debug format {:?}.",f);
     let mut test = Tokenizer {
-        src: String::from("mov @R0, #22H \n mov R1, #34H"),
+        src: String::from("label1:   mov @R0, #22H \n mov P0.1, #34H"),
         pos: 0,
     };
 
-    loop {
-        match test.parse_next() {
-            None => break,
-            Some(token) => println!("Found token : {:?}", token),
+    // loop {
+    //     match test.parse_next() {
+    //         None => break,
+    //         Some(token) => println!("Found token : {:?}", token),
+    //     }
+    // }
+
+    for _ in 0..10   {
+        match test.parse_all_as_id() {
+            None => {
+                match test.consume_comma() {
+                    false => break,
+                    true  => {
+                        println!("Parsed comma successfully")
+                    }
+                }
+            }
+            Some(token) => {
+                test.pos += token.len;
+                println!("Id parsed is : {:?}",token)
+            }
+
         }
     }
 }

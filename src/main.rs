@@ -188,26 +188,34 @@
 //     }
 // }
 pub mod Sim8051;
- mod lexer;
+pub mod assembler;
+pub mod lexer;
 
-fn main()
-{
+fn main() {
     println!("Hello 8051 EmuSimulator");
 
     let mut memory = Sim8051::InternalMemory::default();
     let z = memory.get_register_bank(1);
-    for i in z.ptr.iter_mut()
-    {
+    for i in z.ptr.iter_mut() {
         *i = 0xFF;
     }
-    for (n,i) in memory.memory.iter().enumerate()
-    {
-        print!("{:4} ",i);
-        if (n+1) % 8 == 0
-        {
+    for (n, i) in memory.memory.iter().enumerate() {
+        print!("{:4} ", i);
+        if (n + 1) % 8 == 0 {
             println!();
         }
     }
     lexer::nothing();
     lexer::string_handling();
+    let mut asm = assembler::Assembler::default();
+    asm.read_src(String::from("./test.asm"));
+
+    asm.tokenizer.src.push_str("\n$");
+    let z = asm.tokenizer.src;
+    asm.tokenizer.src = String::from("^\n");
+    asm.tokenizer.src.push_str(&z);
+    println!("\nRead asm src file : \n {}",asm.tokenizer.src);
+
+    // Now start parsing the grammar
+    asm.start();
 }

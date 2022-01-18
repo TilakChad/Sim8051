@@ -7,11 +7,11 @@ use crate::Sim8051;
 #[derive(Debug)]
 pub enum TokenType {
     ID(String),
-    IMM(u8, u16),
+    IMM(u16),
     COMMA,
     LINE,
     HEX(u16),
-    IND(u8),
+    IND(Sim8051::ScratchpadRegisters),
     BIT_ADDR(Sim8051::SFR, u8),
     LABEL(String),
     INVALID,
@@ -32,47 +32,58 @@ pub struct Tokenizer {
 
 impl Default for Tokenizer {
     fn default() -> Tokenizer {
-        Tokenizer{ src : String::new(),
-                   pos : 0
+        Tokenizer {
+            src: String::new(),
+            pos: 0,
         }
     }
 }
 
 impl Tokenizer {
-    pub fn parse_next(&mut self) -> Option<Token> {
-        // Might need to implement a DFA fist .. will be doing that in class today
+    pub fn parse_all(lexeme: &str) -> Option<Token> {
         let mut buf = String::with_capacity(50);
-        // TODO :: If newline, return newline token ..
+        // TODO :: If newline, return newline token or maybe not..
         // Now we going for parser and parsing
-        let mut ptr = self
-            .src
+        let mut ptr = lexeme
             .chars()
-            .skip(self.pos)
             .skip_while(|x| x.is_ascii_whitespace())
             .peekable();
-        let mut count = self
-            .src
-            .chars()
-            .skip(self.pos)
-            .take_while(|x| x.is_ascii_whitespace())
-            .count();
-        self.pos += count;
-        // Tokenize the input stream now
         let mut token = None;
-        println!("Tokenizer called here with skip : {}", self.pos);
-
         // Consume white space character here
         token = match ptr.peek() {
             None => None,
             Some(y) => {
                 match *y {
+                    ch if ch.is_ascii_digit() => {
+                        if let Some(hex) = Self::parse_hex(&lexeme) {
+                            Some(Token {
+                                token: TokenType::HEX(hex),
+                                len: 0,
+                            })
+                        } else {
+                            None
+                        }
+                    }
                     '#' => {
-                        self.pos += 1;
-                        self.parse_hex()
+                        // This is the immediate operands
+                        if let Some(hex) = Self::parse_hex(&lexeme[1..]) {
+                            Some(Token {
+                                token: TokenType::IMM(hex),
+                                len: 0,
+                            })
+                        } else {
+                            None
+                        }
                     }
                     '@' => {
-                        self.pos += 1;
-                        self.parse_id()
+                        use std::str::FromStr;
+                        Some(Token {
+                            token: TokenType::IND(
+                                Sim8051::ScratchpadRegisters::from_str(&lexeme)
+                                    .expect("Failed to match indirectable register"),
+                            ),
+                            len: 2,
+                        })
                     }
                     ',' => Some(Token {
                         token: TokenType::COMMA,
@@ -82,16 +93,17 @@ impl Tokenizer {
                         token: TokenType::LINE,
                         len: 1,
                     }), // Maybe we could ignore these white spaces / newlines for pasrsing
-                    _ => self.parse_id(),
+                    _ => {
+                        // First try parsing as bit field and then only fallback to id
+                        let is_bitaddr = Self::parse_bitaddr(&lexeme);
+                        match is_bitaddr {
+                            Some(_) => is_bitaddr,
+                            None => Self::parse_id(&lexeme),
+                        }
+                    }
                 }
             }
         };
-
-        if let Some(ref y) = token {
-            self.pos += y.len;
-        }
-
-        // Lets start with a DFA
         token
     }
     pub fn read_file(&mut self, src: String) {
@@ -100,10 +112,10 @@ impl Tokenizer {
             .expect("Failed to read input file");
     }
 
-    pub fn parse_hex(&self) -> Option<Token> {
-        let mut ptr = self.src.chars().skip(self.pos).peekable();
+    pub fn parse_hex(lexeme: &str) -> Option<u16> {
         let mut num: u16 = 0;
 
+        let mut ptr = lexeme.chars().peekable();
         let mut token = None;
         let mut count = 0;
         loop {
@@ -116,10 +128,7 @@ impl Tokenizer {
                     ch @ '0'..='9' => num = (num << 4) | (ch as u16 - '0' as u16),
                     ch @ 'A'..='F' => num = (num << 4) | (ch as u16 - 'A' as u16 + 10),
                     'H' => {
-                        token = Some(Token {
-                            token: TokenType::HEX(num),
-                            len: count + 1,
-                        });
+                        token = Some(num);
                         break;
                     }
                     _ => {
@@ -143,13 +152,9 @@ impl Tokenizer {
             .count();
 
         let mut len = 0;
-        let mut ptr = self
-            .src
-            .chars()
-            .skip(self.pos+count)
-            .peekable();
+        let mut ptr = self.src.chars().skip(self.pos + count).peekable();
 
-        let specials = vec!['.','@','#',':'];
+        let specials = vec!['.', '@', '#', ':'];
         if let Some(y) = ptr.peek() {
             if !(y.is_ascii_alphanumeric() || specials.contains(&y)) {
                 return None;
@@ -157,28 +162,22 @@ impl Tokenizer {
         } else {
             return None;
         }
-        let done         = ptr.take_while(|x| x.is_ascii_alphanumeric() || specials.contains(&x));
-        let buf : String = done.collect();
+        let done = ptr.take_while(|x| x.is_ascii_alphanumeric() || specials.contains(&x));
+        let buf: String = done.collect();
 
-        len = buf.len()+count;
+        len = buf.len() + count;
 
-        return Some(Token{
-            token : TokenType::ID(buf),
-            len
+        return Some(Token {
+            token: TokenType::ID(buf),
+            len,
         });
     }
 
-
     // try parsing as id first
-    pub fn parse_id(&self) -> Option<Token> {
+    pub fn parse_id(lexeme: &str) -> Option<Token> {
         // First letter should be alphabetic
-        let mut ptr = self
-            .src
-            .chars()
-            .skip(self.pos)
-            .skip_while(|x| x.is_ascii_whitespace());
-
-        if let Some(y) = ptr.next() {
+        let mut ptr = lexeme.chars().peekable();
+        if let Some(y) = ptr.peek() {
             if !y.is_ascii_alphabetic() {
                 return None;
             }
@@ -187,21 +186,8 @@ impl Tokenizer {
         }
 
         let mut len = 0;
-
-        let mut ptr = self
-            .src
-            .chars()
-            .skip(self.pos)
-            .enumerate()
-            .skip_while(|x| x.1.is_ascii_whitespace())
-            .peekable();
-        if let Some(y) = ptr.peek() {
-            len = y.0;
-        }
-
-        let done = ptr.take_while(|x| x.1.is_ascii_alphanumeric());
-
-        let buf: String = done.map(|(_, ch)| ch).collect();
+        let done = ptr.take_while(|x| x.is_ascii_alphanumeric());
+        let buf: String = done.collect();
         len += buf.len();
         return Some(Token {
             token: TokenType::ID(buf),
@@ -209,15 +195,15 @@ impl Tokenizer {
         });
     }
 
-    pub fn parse_label(&self) -> Option<Token> {
-        let mut str = self.parse_id();
+    pub fn parse_label(lexeme: &str) -> Option<Token> {
+        let mut str = Self::parse_id(lexeme);
         let mut token: Option<Token> = None;
         // Rewrite
         token = match str {
             None => None,
             Some(tok) => match tok.token {
                 TokenType::ID(mut id) => {
-                    let mut ptr = self.src.chars().skip(self.pos + tok.len).peekable();
+                    let mut ptr = lexeme.chars().skip(tok.len).peekable();
                     match ptr.peek() {
                         None => None,
                         Some(ch) => {
@@ -239,16 +225,16 @@ impl Tokenizer {
         token
     }
 
-    pub fn parse_bitaddr(&self) -> Option<Token> {
+    pub fn parse_bitaddr(lexeme: &str) -> Option<Token> {
         // Its syntax is something followed by dot and then followed by a single number .. Nothing more
         use std::str::FromStr;
-        let addressable = self.parse_id();
+        let addressable = Self::parse_id(lexeme);
         let mut token = None;
         token = match addressable {
             None => None,
             Some(tok) => match tok.token {
                 TokenType::ID(str) => {
-                    let mut ptr = self.src.chars().skip(self.pos + tok.len).peekable();
+                    let mut ptr = lexeme.chars().skip(tok.len).peekable();
                     match ptr.peek() {
                         None => None,
                         Some(z) => {
@@ -338,68 +324,68 @@ pub fn string_handling() {
     }
     println!("Total uppercase is : {}.", str);
 
-    let mut tokenizer = Tokenizer {
-        src: String::from("The Rust Programming Language"),
-        pos: 0,
-    };
-    tokenizer.parse_next();
-    tokenizer.parse_next();
-    tokenizer.parse_next();
-    tokenizer.parse_next();
+    // let mut tokenizer = Tokenizer {
+    //     src: String::from("The Rust Programming Language"),
+    //     pos: 0,
+    // };
+    // tokenizer.parse_next();
+    // tokenizer.parse_next();
+    // tokenizer.parse_next();
+    // tokenizer.parse_next();
 
-    let z = (4, "Four");
-    println!("{} -> {}", z.0, z.1);
+    // let z = (4, "Four");
+    // println!("{} -> {}", z.0, z.1);
 
-    // Parsing test
-    let hextokenizer = Tokenizer {
-        src: String::from("ABZH"),
-        pos: 0,
-    };
-    // let z = hextokenizer.parse_hex();
-    // match z {
-    //     Some(x) => println!("Found hex value : {}.", x),
-    //     None => println!("Found no hex value -_-"),
+    // // Parsing test
+    // let hextokenizer = Tokenizer {
+    //     src: String::from("ABZH"),
+    //     pos: 0,
+    // };
+    // // let z = hextokenizer.parse_hex();
+    // // match z {
+    // //     Some(x) => println!("Found hex value : {}.", x),
+    // //     None => println!("Found no hex value -_-"),
+    // // }
+
+    // let idtokenizer = Tokenizer {
+    //     src: String::from("  Something wild"),
+    //     pos: 0,
+    // };
+    // idtokenizer.parse_id();
+
+    // let newvec = vec![1, 2, 3, 4, 5, 6];
+    // let mut pvec = newvec.iter();
+    // let res = pvec.take_while(|x| **x < 3);
+    // for i in res {
+    //     println!("i -> {}", i);
     // }
 
-    let idtokenizer = Tokenizer {
-        src: String::from("  Something wild"),
-        pos: 0,
-    };
-    idtokenizer.parse_id();
-
-    let newvec = vec![1, 2, 3, 4, 5, 6];
-    let mut pvec = newvec.iter();
-    let res = pvec.take_while(|x| **x < 3);
-    for i in res {
-        println!("i -> {}", i);
-    }
-
-    // string testing
-    let mut test = String::from("   The RUsty");
-    let mut ptr = test
-        .chars()
-        .enumerate()
-        .skip_while(|x| x.1.is_ascii_whitespace())
-        .take_while(|x| x.1.is_ascii_uppercase());
-    // match ptr.next()
-    // {
-    //     Some(y) => println!("0 -> {}, 1 -> {}",y.0,y.1),
-    //     None    => println!("Nothing found here .. sad")
+    // // string testing
+    // let mut test = String::from("   The RUsty");
+    // let mut ptr = test
+    //     .chars()
+    //     .enumerate()
+    //     .skip_while(|x| x.1.is_ascii_whitespace())
+    //     .take_while(|x| x.1.is_ascii_uppercase());
+    // // match ptr.next()
+    // // {
+    // //     Some(y) => println!("0 -> {}, 1 -> {}",y.0,y.1),
+    // //     None    => println!("Nothing found here .. sad")
+    // // }
+    // for i in ptr {
+    //     println!("From loop : {} {}", i.0, i.1);
     // }
-    for i in ptr {
-        println!("From loop : {} {}", i.0, i.1);
-    }
 
-    // Parse tests
-    let mut labeltest = Tokenizer {
-        src: String::from("P2.1 a,b"),
-        pos: 0,
-    };
+    // // Parse tests
+    // let mut labeltest = Tokenizer {
+    //     src: String::from("P2.1 a,b"),
+    //     pos: 0,
+    // };
 
-    match labeltest.parse_bitaddr() {
-        None => println!("Failed to parse given token "),
-        Some(z) => println!("Found some token :-> {:?}.", z),
-    }
+    // match labeltest.parse_bitaddr() {
+    //     None => println!("Failed to parse given token "),
+    //     Some(z) => println!("Found some token :-> {:?}.", z),
+    // }
 
     // let f = TokenType::BIT_ADDR(Sim8051::SFR::Port(Sim8051::Ports::P0),3);
     // println!("In Debug format {:?}.",f);
@@ -415,21 +401,67 @@ pub fn string_handling() {
     //     }
     // }
 
-    for _ in 0..10   {
+    for _ in 0..10 {
         match test.parse_all_as_id() {
-            None => {
-                match test.consume_comma() {
-                    false => break,
-                    true  => {
-                        println!("Parsed comma successfully")
-                    }
+            None => match test.consume_comma() {
+                false => break,
+                true => {
+                    println!("Parsed comma successfully")
                 }
-            }
+            },
             Some(token) => {
                 test.pos += token.len;
-                println!("Id parsed is : {:?}",token)
+                println!("Id parsed is : {:?}", token)
             }
-
         }
+    }
+
+    println!("\n\nParsing now : ");
+    let str = "P0jpt";
+    match Tokenizer::parse_all(&str) {
+        None => println!("No such bit addr to be found"),
+        Some(z) => println!("Found bit addr -> {:?}.", z),
+    }
+}
+
+pub fn retrieve_rvalue(sim :&mut Sim8051::Sim8051, token : &TokenType) -> Option<u8>{
+    use TokenType::*;
+    match &token {
+        HEX(hex) => {
+            Some(sim.internal_memory.memory[*hex as usize])
+        }
+        IMM(hex) => Some(*hex as u8),
+        ID(reg) => {
+            use std::str::FromStr;
+            let reg = Sim8051::ScratchpadRegisters::from_str(reg.as_str())
+                .expect("Not a scratchpad register.. error");
+            // Return its location depending upon the currently selected register bank
+            let pswloc =
+                Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
+                as usize;
+            let count =
+                (0x18 & sim.internal_memory.memory[pswloc]) >> 3;
+            let start = (count * 8) as usize;
+            Some(
+                sim.internal_memory.memory
+                                   [start + reg.reg_count() as usize],
+            )
+        }
+        // For indirect addressing, retrieve the value of the register to use as src location
+        IND(reg) => {
+            let pswloc =
+                Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
+                as usize;
+            let count =
+                (0x18 & sim.internal_memory.memory[pswloc]) >> 3;
+            let val = count * 8 + reg.reg_count();
+            Some(
+                sim.internal_memory.memory[sim
+                                           .internal_memory
+                                           .memory[val as usize]
+                                           as usize],
+            )
+        }
+        _ => None,
     }
 }

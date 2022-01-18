@@ -28,9 +28,12 @@ use crate::{
 //
 //
 
+use std::collections::HashMap; // or map? either way duplicated entries are to be discarded or warned
+
 pub struct Assembler {
     pub simulator: Sim8051::Sim8051,
     pub tokenizer: lexer::Tokenizer,
+    pub jmptable: HashMap<String, usize>, // represents label and their position on the source file for quick jumping
 }
 
 impl Default for Assembler {
@@ -38,6 +41,7 @@ impl Default for Assembler {
         Assembler {
             simulator: Sim8051::Sim8051::default(),
             tokenizer: lexer::Tokenizer::default(),
+            jmptable: HashMap::new(),
         }
     }
 }
@@ -56,8 +60,47 @@ impl Assembler {
         }
     }
 
+    pub fn show_jmptable(&self) {
+        println!("-------------------------------------------------- Showing jmp table of assembler ----------------------------------------");
+        for (name, pos) in &self.jmptable {
+            println!("{:<15} -> {:<10}", name, pos);
+        }
+    }
+
+    pub fn collect_labels(&mut self) {
+        self.tokenizer.pos = 1;
+        let mut token;
+
+        loop {
+            token = self.tokenizer.parse_all_as_id();
+            match token {
+                Some(tok) => {
+                    if let lexer::TokenType::ID(val) = &tok.token {
+                        if val.contains(':') {
+                            let labelname: String = val.chars().take_while(|x| *x != ':').collect();
+                            self.jmptable.insert(labelname, self.tokenizer.pos);
+                        }
+                    }
+                    self.tokenizer.pos += tok.len;
+                }
+                None => {
+                    if self.tokenizer.src.chars().skip(self.tokenizer.pos).next() == Some(',') {
+                        self.tokenizer.pos += 1;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    self.tokenizer.pos = 0;
+    }
+
     pub fn start(&mut self) {
+        self.collect_labels();
         let mut ptr = self.tokenizer.src.chars();
+        // do fist pass to collect all the labels
         if let Some(ch) = ptr.next() {
             if ch != '^' {
                 println!("Unexpected character at the beginning of the file");
@@ -69,6 +112,7 @@ impl Assembler {
         self.tokenizer.pos += 1;
         self.prog();
     }
+
     // This function is the main core of the parser
     // I guess LL(1) grammar should work fine
     fn prog(&mut self) {
@@ -81,7 +125,6 @@ impl Assembler {
             .skip_while(|x| x.is_ascii_whitespace());
         if let Some(ch) = ptr.next() {
             if ch == '$' {
-                println!("End of the parser reached");
                 return;
             }
         }
@@ -94,52 +137,62 @@ impl Assembler {
             Some(tok) => {
                 if let lexer::TokenType::ID(val) = &tok.token {
                     if val.contains(':') {
-                        println!("Expanded along the grammar => label stmt prog.");
                         self.tokenizer.pos += tok.len;
-
                         // Read another token now
                         let newtoken = self.tokenizer.parse_all_as_id();
                         if let Some(z) = newtoken {
-                            self.stmt(&z);
-                            self.prog();
+                            if self.stmt(&z) {
+                                              self.prog()
+                            };
                         } else {
                             println!("Invalid token here : ");
                         }
                     } else {
                         // It has to be id
-                        self.stmt(&tok);
-                        self.prog();
+                        if self.stmt(&tok) {
+                            self.prog();
+                        }
                     }
                 }
             }
         }
     }
 
-    fn stmt(&mut self, prev_token: &lexer::Token) {
+    fn stmt(&mut self, prev_token: &lexer::Token) -> bool {
         // This token better be
         // This func now should decide to return or call the second statement
         // This resulting token better be a asm instruction
         // Lets differ match, lets just try parsing
-        println!("Expanded along : stmt -> stmt prog");
         self.tokenizer.pos += prev_token.len;
 
         // else its the single instruction command .. execute it right here
         // use ad hoc context sensitiveness here
 
         if let lexer::TokenType::ID(ins) = &prev_token.token {
-            match ins.as_str() {
+            let pass = match ins.as_str() {
                 // list all single instructions here
-                "ret" => println!("Found ret command"),
-                "swapa" => println!("Found swap command"),
-                "rla" => println!("Found rl command"),
+                "ret" => {
+                    let returnpos = self.jmptable.get(&String::from("ret"));
+                    if let Some(&pos) = returnpos {
+                        self.jmptable.remove(&String::from("ret"));
+                        self.tokenizer.pos = pos;
+                    }
+                    println!("Found ret command");
+                    true
+                },
+                "end"=> {
+                    println!("\n\nReached at the end of the program\n");
+                    false
+                }
                 _ => {
                     // Move toward another branch
-                    self.sstmt(&ins);
+                    self.sstmt(&ins)
                 }
-            }
-            self.prog();
+            };
+            pass
         } else {
             println!("Unexpected token found here in stmt branch...");
+            false
         }
     }
 
@@ -357,10 +410,34 @@ impl Assembler {
                                     }
                                 };
                                 // get the content of that memory location as i16 first and then do some casting and manipulation here and there
-                                let val  = self.simulator.internal_memory.memory[memloc.unwrap() as usize] as i16;
-                                let ans  = ((val + step) & 0xFF) as u8;
-                                self.simulator.internal_memory.memory[memloc.unwrap() as usize] = ans;
+                                let val = self.simulator.internal_memory.memory
+                                    [memloc.unwrap() as usize]
+                                    as i16;
+                                let ans = ((val + step) & 0xFF) as u8;
+                                self.simulator.internal_memory.memory[memloc.unwrap() as usize] =
+                                    ans;
                                 true
+                            }
+                            ch @ "ajmp" | ch @ "acall" => {
+                                // just jmp to the label from here
+                                // How should it change the syntax parsing process?
+                                let label = String::from(ins);
+                                let pos = self.jmptable.get(&label);
+                                if let Some(&y) = pos {
+                                    if ch == "ajmp" {
+                                        self.tokenizer.pos = y;
+                                    }
+                                    else {
+                                        // push current position for return statement
+                                        // using ret .. too bored to change datastructure
+                                        self.jmptable.insert(String::from("ret"),self.tokenizer.pos);
+                                        self.tokenizer.pos = y;
+                                    }
+                                    true
+                                } else {
+                                    println!("\nInvalid {} command : {} not found.", ch,label);
+                                    true
+                                }
                             }
                             _ => {
                                 // This not a single operand instruction
@@ -391,6 +468,7 @@ impl Assembler {
                     lexer::Tokenizer::parse_all(first),
                     lexer::Tokenizer::parse_all(&second),
                 ) {
+                    self.tokenizer.pos += token.len;
                     // Now execute the command
                     use lexer::TokenType::*;
                     use std::str::FromStr;
@@ -471,7 +549,7 @@ impl Assembler {
                             };
                             self.simulator.mov(src.unwrap(), dest.unwrap());
                             success = true;
-                        },
+                        }
                         // where's the single binding?
                         inst @ "add" | inst @ "addc" | inst @ "subb" => {
                             // First operand is always A .. makes one thing easy
@@ -480,13 +558,15 @@ impl Assembler {
                             // C, AC, OV and P :- Getting boooorring now
 
                             if first == "A" {
-                                let operand = lexer::retrieve_rvalue(&mut self.simulator,&op2.token);
+                                let operand =
+                                    lexer::retrieve_rvalue(&mut self.simulator, &op2.token);
                                 // Allow addition with wraparound effect
-                                let addr     = Sim8051::sfr_addr(&self.simulator.accumulator);
-                                let mut val  = self.simulator.internal_memory.memory[addr as usize] as i32;
+                                let addr = Sim8051::sfr_addr(&self.simulator.accumulator);
+                                let mut val =
+                                    self.simulator.internal_memory.memory[addr as usize] as i32;
                                 let mut should_set_carry = false;
                                 let mut factor = 1;
-                                if inst == "addc" || inst == "subb"{
+                                if inst == "addc" || inst == "subb" {
                                     // check the carry flag
                                     // special case if 0xff is A
                                     if inst == "subb" {
@@ -502,33 +582,37 @@ impl Assembler {
                                     }
                                 }
 
-                                let temp    = val;
-                                val         = val + factor *  operand.unwrap() as i32;
-                                let ans     = (val & 0xff) as u8;
+                                let temp = val;
+                                val = val + factor * operand.unwrap() as i32;
+                                let ans = (val & 0xff) as u8;
                                 self.simulator.internal_memory.memory[addr as usize] = ans;
                                 // setting these flags is plain pain
                                 use std::ops::BitOr;
-                                should_set_carry = should_set_carry.bitor((val as i32 & 0xff00) > 0);
+                                should_set_carry =
+                                    should_set_carry.bitor((val as i32 & 0xff00) > 0);
                                 self.simulator.set_carry_bit(should_set_carry);
                                 self.simulator.set_parity_bit(ans);
                                 // TODO :: Set these two stupid flags (one not stupid)
 
-                                let should_set_parity = ((temp & 0x000F + operand.unwrap() as i32 & 0x000F) >> 4) > 0;
+                                let should_set_parity =
+                                    ((temp & 0x000F + operand.unwrap() as i32 & 0x000F) >> 4) > 0;
                                 self.simulator.set_auxiliary_carry_bit(should_set_parity);
 
                                 // lastly overflow bit
                                 // overflow bit is set when there's overflow from 7th bit or 8th bit but not from both
-                                let is_carry_to_msb = ((temp & 0x007F) + (operand.unwrap() as i32 & 0x007F) >> 7) > 0;
+                                let is_carry_to_msb =
+                                    ((temp & 0x007F) + (operand.unwrap() as i32 & 0x007F) >> 7) > 0;
                                 use std::ops::BitXor;
-                                self.simulator.set_auxiliary_carry_bit(should_set_carry.bitxor(is_carry_to_msb));
-                            }
-                            else {
-                                println!("Invalid operand to {} instruction ",inst);
+                                self.simulator.set_auxiliary_carry_bit(
+                                    should_set_carry.bitxor(is_carry_to_msb),
+                                );
+                            } else {
+                                println!("Invalid operand to {} instruction ", inst);
                                 success = false;
                             }
-                        },
+                        }
                         // "subb" => { // I guess subb can be merged with addc and add instructions // merged above
-                        _ => success = false
+                        _ => success = false,
                     }
                 }
             }

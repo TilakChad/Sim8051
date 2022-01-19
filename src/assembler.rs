@@ -529,12 +529,16 @@ impl Assembler {
                                     ) {
                                         Ok(reg) => start + reg.reg_count(),
                                         Err(_) => {
-                                            // try parsing as port address now
-                                            let port = Sim8051::sfr_addr(
-                                                &Sim8051::SFR::from_str(reg.as_str())
-                                                    .expect("Not a scratchpad or port or Acc or B"),
-                                            );
-                                            port
+                                            // before that see it it is A
+                                            if reg == "A" {
+                                                Sim8051::sfr_addr(&self.simulator.accumulator)
+                                            } else {
+                                                Sim8051::sfr_addr(
+                                                    &Sim8051::SFR::from_str(reg.as_str()).expect(
+                                                        "Not a scratchpad or port or Acc or B",
+                                                    ),
+                                                )
+                                            }
                                         }
                                     };
 
@@ -544,7 +548,7 @@ impl Assembler {
                                 IND(reg) => {
                                     let pswloc =
                                         Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
-                                        as usize;
+                                            as usize;
                                     let count =
                                         (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
                                     let val = count * 8 + reg.reg_count();
@@ -560,7 +564,7 @@ impl Assembler {
                                 ID(reg) => {
                                     let pswloc =
                                         Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
-                                        as usize;
+                                            as usize;
                                     let count =
                                         (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
                                     let start = count * 8;
@@ -570,12 +574,15 @@ impl Assembler {
                                     ) {
                                         Ok(reg) => start + reg.reg_count(),
                                         Err(_) => {
-                                            // try parsing as port address now
-                                            let port = Sim8051::sfr_addr(
-                                                &Sim8051::SFR::from_str(reg.as_str())
-                                                    .expect("Not a scratchpad or port or Acc or B"),
-                                            );
-                                            port
+                                            if reg == "A" {
+                                                Sim8051::sfr_addr(&self.simulator.accumulator)
+                                            } else {
+                                                Sim8051::sfr_addr(
+                                                    &Sim8051::SFR::from_str(reg.as_str()).expect(
+                                                        "Not a scratchpad or port or Acc or B",
+                                                    ),
+                                                )
+                                            }
                                         }
                                     };
                                     Some(self.simulator.internal_memory.memory[memloc as usize])
@@ -584,16 +591,16 @@ impl Assembler {
                                 IND(reg) => {
                                     let pswloc =
                                         Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
-                                        as usize;
+                                            as usize;
                                     let count =
                                         (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
                                     let val = count * 8 + reg.reg_count();
                                     Some(
                                         self.simulator.internal_memory.memory[self
-                                                                              .simulator
-                                                                              .internal_memory
-                                                                              .memory[val as usize]
-                                                                              as usize],
+                                            .simulator
+                                            .internal_memory
+                                            .memory[val as usize]
+                                            as usize],
                                     )
                                 }
                                 _ => None,
@@ -689,8 +696,8 @@ impl Assembler {
                                     BIT_ADDR(reg, bit) => {
                                         // Retrieve operand manually
                                         (self.simulator.internal_memory.memory
-                                         [Sim8051::sfr_addr(&reg) as usize]
-                                         & (1 << bit))
+                                            [Sim8051::sfr_addr(&reg) as usize]
+                                            & (1 << bit))
                                             > 0
                                     }
                                     _ => {
@@ -704,13 +711,12 @@ impl Assembler {
                                 if let Some(&val) = &pos {
                                     if condition && command == "jb" {
                                         self.tokenizer.pos = val;
-                                    }
-                                    else if !condition && command == "jnb" {
+                                    } else if !condition && command == "jnb" {
                                         self.tokenizer.pos = val;
                                     }
                                 } else {
                                     success = false;
-                                    panic!("Not a valid jmp label {}",second);
+                                    panic!("Not a valid jmp label {}", second);
                                 }
                             } else {
                                 println!("Not a bit addressable value panic");

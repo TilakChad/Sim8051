@@ -288,8 +288,8 @@ impl Assembler {
                                         // Get the content of the carry flag first
                                         let psw = Sim8051::sfr_addr(&self.simulator.psw);
                                         let cflag = (self.simulator.internal_memory.memory
-                                            [psw as usize]
-                                            & 0x80)
+                                                     [psw as usize]
+                                                     & 0x80)
                                             >> 7;
 
                                         let acc = Sim8051::sfr_addr(&self.simulator.accumulator);
@@ -320,8 +320,8 @@ impl Assembler {
                                         // Get the content of the carry flag first
                                         let psw = Sim8051::sfr_addr(&self.simulator.psw);
                                         let cflag = (self.simulator.internal_memory.memory
-                                            [psw as usize]
-                                            & 0x80)
+                                                     [psw as usize]
+                                                     & 0x80)
                                             >> 7;
 
                                         let acc = Sim8051::sfr_addr(&self.simulator.accumulator);
@@ -353,8 +353,8 @@ impl Assembler {
                                     let jmp_condition = if command == "jc" || command == "jnc" {
                                         // check carry bit '
                                         let carry_set = (self.simulator.internal_memory.memory
-                                            [Sim8051::sfr_addr(&self.simulator.psw) as usize]
-                                            & 0x80)
+                                                         [Sim8051::sfr_addr(&self.simulator.psw) as usize]
+                                                         & 0x80)
                                             > 0;
                                         if carry_set && command == "jc" {
                                             true
@@ -365,8 +365,8 @@ impl Assembler {
                                         }
                                     } else {
                                         let is_acc_zero = (self.simulator.internal_memory.memory
-                                            [Sim8051::sfr_addr(&self.simulator.accumulator)
-                                                as usize])
+                                                           [Sim8051::sfr_addr(&self.simulator.accumulator)
+                                                            as usize])
                                             == 0;
                                         if is_acc_zero && command == "jz" {
                                             true
@@ -433,7 +433,7 @@ impl Assembler {
                                                                  & self.simulator.internal_memory.memory
                                                                  [pswloc])
                                                     >> 3;
-                                                Some(count * 8 + reg.reg_count())
+                                                Some(self.simulator.internal_memory.memory[(count * 8 + reg.reg_count()) as usize])
                                             }
                                             _ => None,
                                         }
@@ -501,112 +501,120 @@ impl Assembler {
                     lexer::Tokenizer::parse_all(&second),
                 ) {
                     self.tokenizer.pos += token.len;
-                    // Now execute the command
-                    use lexer::TokenType::*;
-                    use std::str::FromStr;
+                    if self.tokenizer.consume_comma()
+                    {
+                        println!("Consumed comma and getting ready");
+                        self.fstmt(command, &first, &second);
+                    }
+                    else
+                    {
+                        // Now execute the command
+                        use lexer::TokenType::*;
+                        use std::str::FromStr;
 
-                    match command {
-                        "mov" => {
-                            let src = match op1.token {
-                                HEX(hex) => Some(hex as u8),
-                                IMM(_) => None,
-                                ID(reg) => {
-                                    // This is the direct register addressing mode .. it should be a register
+                        match command {
+                            "mov" => {
+                                let src = match op1.token {
+                                    HEX(hex) => Some(hex as u8),
+                                    IMM(_) => None,
+                                    ID(reg) => {
+                                        // This is the direct register addressing mode .. it should be a register
 
-                                    // Return its location depending upon the currently selected register bank
-                                    let pswloc =
-                                        Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
-                                        as usize;
-                                    let count =
-                                        (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
-                                    let start = count * 8;
+                                        // Return its location depending upon the currently selected register bank
+                                        let pswloc =
+                                            Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
+                                            as usize;
+                                        let count =
+                                            (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
+                                        let start = count * 8;
 
-                                    // try parsing it as a scratchpad register
-                                    // or it could be a port too
-                                    // TODO :: PSW is directly writable from here, so maybe consider changing the behaviour
-                                    let memloc = match Sim8051::ScratchpadRegisters::from_str(
-                                        reg.as_str(),
-                                    ) {
-                                        Ok(reg) => start + reg.reg_count(),
-                                        Err(_) => {
-                                            // before that see it it is A
-                                            if reg == "A" {
-                                                Sim8051::sfr_addr(&self.simulator.accumulator)
-                                            } else {
-                                                Sim8051::sfr_addr(
-                                                    &Sim8051::SFR::from_str(reg.as_str()).expect(
-                                                        "Not a scratchpad or port or Acc or B",
-                                                    ),
-                                                )
+                                        // try parsing it as a scratchpad register
+                                        // or it could be a port too
+                                        // TODO :: PSW is directly writable from here, so maybe consider changing the behaviour
+                                        let memloc = match Sim8051::ScratchpadRegisters::from_str(
+                                            reg.as_str(),
+                                        ) {
+                                            Ok(reg) => start + reg.reg_count(),
+                                            Err(_) => {
+                                                // before that see it it is A
+                                                if reg == "A" {
+                                                    Sim8051::sfr_addr(&self.simulator.accumulator)
+                                                } else {
+                                                    Sim8051::sfr_addr(
+                                                        &Sim8051::SFR::from_str(reg.as_str()).expect(
+                                                            "Not a scratchpad or port or Acc or B",
+                                                        ),
+                                                    )
+                                                }
                                             }
-                                        }
-                                    };
+                                        };
 
-                                    Some(memloc)
-                                }
-                                // For indirect addressing, retrieve the value of the register to use as src location
-                                IND(reg) => {
-                                    let pswloc =
-                                        Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
+                                        Some(memloc)
+                                    }
+                                    // For indirect addressing, retrieve the value of the register to use as src location
+                                    IND(reg) => {
+                                        let pswloc =
+                                            Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
                                             as usize;
-                                    let count =
-                                        (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
-                                    let val = count * 8 + reg.reg_count();
-                                    Some(self.simulator.internal_memory.memory[val as usize])
-                                }
-                                _ => None,
-                            };
-                            let dest = match op2.token {
-                                HEX(hex) => {
-                                    Some(self.simulator.internal_memory.memory[hex as usize])
-                                }
-                                IMM(hex) => Some(hex as u8), // This is the error but can't return anything here .. so changing the return type
-                                ID(reg) => {
-                                    let pswloc =
-                                        Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
+                                        let count =
+                                            (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
+                                        let val = count * 8 + reg.reg_count();
+                                        Some(self.simulator.internal_memory.memory[val as usize])
+                                    }
+                                    _ => None,
+                                };
+                                let dest = match op2.token {
+                                    HEX(hex) => {
+                                        Some(self.simulator.internal_memory.memory[hex as usize])
+                                    }
+                                    IMM(hex) => Some(hex as u8), // This is the error but can't return anything here .. so changing the return type
+                                    ID(reg) => {
+                                        let pswloc =
+                                            Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
                                             as usize;
-                                    let count =
-                                        (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
-                                    let start = count * 8;
+                                        let count =
+                                            (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
+                                        let start = count * 8;
 
-                                    let memloc = match Sim8051::ScratchpadRegisters::from_str(
-                                        reg.as_str(),
-                                    ) {
-                                        Ok(reg) => start + reg.reg_count(),
-                                        Err(_) => {
-                                            if reg == "A" {
-                                                Sim8051::sfr_addr(&self.simulator.accumulator)
-                                            } else {
-                                                Sim8051::sfr_addr(
-                                                    &Sim8051::SFR::from_str(reg.as_str()).expect(
-                                                        "Not a scratchpad or port or Acc or B",
-                                                    ),
-                                                )
+                                        let memloc = match Sim8051::ScratchpadRegisters::from_str(
+                                            reg.as_str(),
+                                        ) {
+                                            Ok(reg) => start + reg.reg_count(),
+                                            Err(_) => {
+                                                if reg == "A" {
+                                                    Sim8051::sfr_addr(&self.simulator.accumulator)
+                                                } else {
+                                                    Sim8051::sfr_addr(
+                                                        &Sim8051::SFR::from_str(reg.as_str()).expect(
+                                                            "Not a scratchpad or port or Acc or B",
+                                                        ),
+                                                    )
+                                                }
                                             }
-                                        }
-                                    };
-                                    Some(self.simulator.internal_memory.memory[memloc as usize])
-                                }
-                                // For indirect addressing, retrieve the value of the register to use as src location
-                                IND(reg) => {
-                                    let pswloc =
-                                        Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
+                                        };
+                                        Some(self.simulator.internal_memory.memory[memloc as usize])
+                                    }
+                                    // For indirect addressing, retrieve the value of the register to use as src location
+                                    IND(reg) => {
+                                        let pswloc =
+                                            Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
                                             as usize;
-                                    let count =
-                                        (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
-                                    let val = count * 8 + reg.reg_count();
-                                    Some(
-                                        self.simulator.internal_memory.memory[self
-                                            .simulator
-                                            .internal_memory
-                                            .memory[val as usize]
-                                            as usize],
-                                    )
-                                }
-                                _ => None,
-                            };
-                            self.simulator.mov(src.unwrap(), dest.unwrap());
-                            success = true;
+                                        let count =
+                                            (0x18 & self.simulator.internal_memory.memory[pswloc]) >> 3;
+                                        let val = count * 8 + reg.reg_count();
+                                        Some(
+                                            self.simulator.internal_memory.memory[self
+                                                                                  .simulator
+                                                                                  .internal_memory
+                                                                                  .memory[val as usize]
+                                                                                  as usize],
+                                        )
+                                    }
+                                    _ => None,
+                                };
+                                println!("Moved from {} to {}",src.unwrap(),dest.unwrap());
+                                self.simulator.mov(src.unwrap(), dest.unwrap());
+                                success = true;
                         }
                         // where's the single binding?
                         inst @ "add" | inst @ "addc" | inst @ "subb" => {
@@ -696,8 +704,8 @@ impl Assembler {
                                     BIT_ADDR(reg, bit) => {
                                         // Retrieve operand manually
                                         (self.simulator.internal_memory.memory
-                                            [Sim8051::sfr_addr(&reg) as usize]
-                                            & (1 << bit))
+                                         [Sim8051::sfr_addr(&reg) as usize]
+                                         & (1 << bit))
                                             > 0
                                     }
                                     _ => {
@@ -723,14 +731,158 @@ impl Assembler {
                                 success = false;
                             }
                         }
+                        "djnz" => {
+                            // what does this command do ?
+                            // -> Decrease byte at given address and jmp to label if it is not zero
+                            // only allows direct and register addressing mode
+                            // Doesn't know what keil does for direct addressing/register addressing .. if it allows Port address or not .. NO keil installed
+                            if let Some(to) = lexer::Tokenizer::parse_all(first) {
+                                use lexer::TokenType::*;
+                                let addr = match to.token {
+                                    HEX(hex) => Some(hex as u8),
+                                    ID(id) => {
+                                        // parse as sctrachpad register
+                                        // locate current register bank first
+                                        let reg = Sim8051::ScratchpadRegisters::from_str(&id)
+                                            .expect("Not a scratchpad register error ...");
+                                        let pswloc = Sim8051::sfr_addr(&Sim8051::SFR::Reg(
+                                            Sim8051::IRegs::PSW,
+                                        ))
+                                            as usize;
+                                        let count: u8 = (0x18
+                                                         & self.simulator.internal_memory.memory[pswloc])
+                                            >> 3;
+                                        Some(count * 8 + reg.reg_count())
+                                    }
+                                    _ => {
+                                        println!("Invalid addressing mode to djnz : {}", first);
+                                        success = false;
+                                        None
+                                    }
+                                };
+                                // decrease the value at that location by 1 using wraparound arithmetic
+                                let mut refval =
+                                    & mut self.simulator.internal_memory.memory[addr.unwrap() as usize];
+                                *refval = ((*refval as i16 - 1) & 0x00FF) as u8;
+                                // Now jump if it needs to
+                                let pos = self.jmptable.get(&second);
+                                if let Some(&val) = &pos {
+                                    self.tokenizer.pos = val;
+                                } else {
+                                    success = false;
+                                    panic!("Not a valid jmp label {}", second);
+                                }
+                            } else {
+                                println!("Invalid first operand to djnz : {}", first);
+                                success = false
+                            }
+                        }
                         _ => success = false,
+                        }
                     }
                 }
             }
         }
         success
     }
+
+
+    // fourth statement procedure and  will handle instructions wth 3 operands
+    fn fstmt(&mut self, command : &str, first:&str, second:&str)    {
+        let new_token = self.tokenizer.parse_all_as_id();
+        let pswloc = Sim8051::sfr_addr(&Sim8051::SFR::Reg(
+            Sim8051::IRegs::PSW,
+        ))
+            as usize;
+        let count: u8 = (0x18
+                         & self.simulator.internal_memory.memory
+                         [pswloc])
+            >> 3;
+        // lol.. can't use logical and with if let
+        if let Some(tok) = new_token {
+            // If I were to rewrite it, the addressing mode thing could have been done much more nicely
+            if command == "cjne" {
+                // wtf .. why cjne had to set carry flag .. didn't they find any easier way for conditional branching
+                // parse the first argument
+                // Its either A, Rn or @Rn
+                if let (Some(op1),Some(op2)) = (lexer::Tokenizer::parse_all(&first),lexer::Tokenizer::parse_all(&second)) {
+                    use lexer::TokenType::*;
+                    use std::str::FromStr;
+                    let mut involve_acc = false;
+                    let src_op = match op1.token {
+                        IND(reg) => {
+                            // Retrieve the active memory bank
+                            Some(self.simulator.internal_memory.memory[(count * 8 + reg.reg_count()) as usize])
+                        },
+                        ID(id) => {
+                            if id == "A" { // yo toriley feri direct addressing linxa
+                                involve_acc = true;
+                                Some(Sim8051::sfr_addr(&self.simulator.accumulator))
+                            }
+                            else {
+                                match Sim8051::ScratchpadRegisters::from_str(id.as_str()) {
+                                    Ok(T) => Some((count * 8 + T.reg_count()) as u8),
+                                    Err(_) => None
+                                }
+                            }
+                        }
+                        _ => None
+                    };
+                    let dest_val = match op2.token {
+                        IMM(hex) => Some(hex as u8),
+                        ID(id) => {
+                            if involve_acc {
+                                match Sim8051::ScratchpadRegisters::from_str(id.as_str()) {
+                                    Ok(T) => Some(self.simulator.internal_memory.memory[(count * 8 + T.reg_count()) as usize]),
+                                    Err(_) => None
+                                }
+                            }
+                            else {
+                                None
+                            }
+                        }
+                        _ => None
+                    };
+                    // stupid instructon
+                    let src_val = self.simulator.internal_memory.memory[src_op.unwrap() as usize];
+                    let psw_loc = Sim8051::sfr_addr(&self.simulator.psw) as usize;
+                    let refpsw = &mut self.simulator.internal_memory.memory[psw_loc];
+                    if src_val < dest_val.unwrap() {
+                        // set the carry flag or reset if lmao
+                        *refpsw = *refpsw | 0x80;
+                    }
+                    else {
+                        *refpsw &= 0x7F;
+                    }
+                    // Prepare for long jump .. get set go
+                    if let lexer::TokenType::ID(id) = tok.token {
+                        let jmp_pos = self.jmptable.get(&id);
+                        if let Some(&val) = jmp_pos {
+                            self.tokenizer.pos = val;
+                        }
+                        else
+                        {
+                            println!("Invalid jmp attempted to label {}",id);
+                        }
+                    }
+
+                }
+                else {
+                    println!("Invalid operands {} and {} to cjne",first,second);
+                }
+            }
+            else {
+                println!("Invalid three argument command {}",command);
+            }
+
+        }
+        else {
+            println!("Invald token at line {}",self.tokenizer.pos);
+        }
+    }
 }
+
+
 
 fn clr_set_cpl(
     asm: &mut Assembler,
@@ -744,8 +896,8 @@ fn clr_set_cpl(
             let loc = Sim8051::sfr_addr(&asm.simulator.accumulator);
             for i in 0..8 {
                 asm.simulator
-                    .internal_memory
-                    .operate_bit_addressable_memory(loc + i, operator);
+                   .internal_memory
+                   .operate_bit_addressable_memory(loc + i, operator);
                 return true;
             }
         }
@@ -755,16 +907,16 @@ fn clr_set_cpl(
             // Reset the carry flag
             let psw = Sim8051::SFR::Reg(Sim8051::IRegs::PSW);
             asm.simulator
-                .internal_memory
-                .operate_bit_addressable_registers(Sim8051::sfr_addr(&psw), 7, operator);
+               .internal_memory
+               .operate_bit_addressable_registers(Sim8051::sfr_addr(&psw), 7, operator);
             true
         }
         // It also support resetting of bit addressable memory
         rstr => {
             if let Some(hex) = lexer::Tokenizer::parse_hex(rstr) {
                 asm.simulator
-                    .internal_memory
-                    .operate_bit_addressable_memory(hex as u8, operator);
+                   .internal_memory
+                   .operate_bit_addressable_memory(hex as u8, operator);
                 true
             } else {
                 // Try to parse it as bit addressable registers
@@ -772,12 +924,12 @@ fn clr_set_cpl(
                     match bitaddr.token {
                         lexer::TokenType::BIT_ADDR(sfr, bit) => {
                             asm.simulator
-                                .internal_memory
-                                .operate_bit_addressable_registers(
-                                    Sim8051::sfr_addr(&sfr),
-                                    bit,
-                                    operator,
-                                );
+                               .internal_memory
+                               .operate_bit_addressable_registers(
+                                   Sim8051::sfr_addr(&sfr),
+                                   bit,
+                                   operator,
+                               );
                             true
                         }
                         _ => false,
@@ -845,8 +997,8 @@ fn anl_orl_xrl(
                         BIT_ADDR(reg, bit) => {
                             // Retrieve operand manually
                             let operand = (asm.simulator.internal_memory.memory
-                                [Sim8051::sfr_addr(&reg) as usize]
-                                & (1 << bit))
+                                           [Sim8051::sfr_addr(&reg) as usize]
+                                           & (1 << bit))
                                 > 0;
                             let result = operator(operand, (pswloc & 0x80) > 0);
                             if result {
@@ -900,7 +1052,7 @@ fn anl_orl_xrl(
                         let val = count * 8 + reg.reg_count();
                         Some(
                             asm.simulator.internal_memory.memory
-                                [asm.simulator.internal_memory.memory[val as usize] as usize],
+                                                         [asm.simulator.internal_memory.memory[val as usize] as usize],
                         )
                     }
                     _ => None,

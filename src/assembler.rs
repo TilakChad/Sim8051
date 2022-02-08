@@ -14,6 +14,7 @@ use crate::{
 //          |     label stmt
 //          |     e
 //
+//
 //  stmt    :-    comma id sstmt
 //          |     e
 //
@@ -58,6 +59,10 @@ impl Assembler {
             }
             Err(_) => false,
         }
+    }
+
+    pub fn read_src_from_string(&mut self, src: String) {
+        self.tokenizer.src = src;
     }
 
     pub fn show_jmptable(&self) {
@@ -607,9 +612,31 @@ impl Assembler {
                                     false
                                 }
                             }
-                            _ => {
+                            "da" => {
+                                if ins == "A" {
+                                    let mut acc = self.simulator.internal_memory.memory
+                                        [Sim8051::sfr_addr(&self.simulator.accumulator) as usize];
+                                    let psw = self.simulator.internal_memory.memory
+                                        [Sim8051::sfr_addr(&self.simulator.psw) as usize];
+                                    let low_nibble = acc & 0x0F;
+                                    if low_nibble > 9 || (psw & (1 << 6)) > 0 {
+                                        acc = acc + 0x06;
+                                    }
+                                    if ((acc & 0xF0) >> 4) > 9 || (psw & (1 << 7)) > 0 {
+                                        acc = acc + 0x60;
+                                    }
+                                    self.simulator.internal_memory.memory
+                                        [Sim8051::sfr_addr(&self.simulator.accumulator) as usize] =
+                                        acc;
+                                    true
+                                } else {
+                                    println!("Invalid operand to da");
+                                    false
+                                }
+                            }
+                            ins => {
                                 // This not a single operand instruction
-                                println!("Invalid single operand instruction.");
+                                println!("Invalid single operand instruction {}.", ins);
                                 false
                             }
                         }
@@ -925,6 +952,92 @@ impl Assembler {
                                 } else {
                                     println!("Invalid first operand to djnz : {}", first);
                                     success = false
+                                }
+                            }
+                            "xch" => {
+                                //Exchange contents of accumulator and given address/register
+                                if first != "A" {
+                                    println!("Invalid first operand to xch : {}", first);
+                                    success = false;
+                                } else {
+                                    if let Some(tok) = lexer::Tokenizer::parse_all(&second) {
+                                        use lexer::TokenType::*;
+                                        let addr = match tok.token {
+                                            HEX(hex) => Some(hex as u8),
+                                            ID(reg) => {
+                                                let pswloc = Sim8051::sfr_addr(&Sim8051::SFR::Reg(
+                                                    Sim8051::IRegs::PSW,
+                                                ))
+                                                    as usize;
+                                                let count = (0x18
+                                                    & self.simulator.internal_memory.memory
+                                                        [pswloc])
+                                                    >> 3;
+                                                let start = count * 8;
+                                                let memloc =
+                                                    match Sim8051::ScratchpadRegisters::from_str(
+                                                        reg.as_str(),
+                                                    ) {
+                                                        Ok(reg) => start + reg.reg_count(),
+                                                        Err(_) => {
+                                                            if reg == "A" {
+                                                                Sim8051::sfr_addr(
+                                                                    &self.simulator.accumulator,
+                                                                )
+                                                            } else {
+                                                                Sim8051::sfr_addr(
+                                                                &Sim8051::SFR::from_str(reg.as_str())
+                                                                    .expect(
+                                                                        "Not a scratchpad or port or Acc or B",
+                                                        ),
+                                                    )
+                                                            }
+                                                        }
+                                                    };
+
+                                                Some(memloc)
+                                            }
+                                            // For indirect addressing, retrieve the value of the register to use as src location
+                                            IND(reg) => {
+                                                let pswloc = Sim8051::sfr_addr(&Sim8051::SFR::Reg(
+                                                    Sim8051::IRegs::PSW,
+                                                ))
+                                                    as usize;
+                                                let count = (0x18
+                                                    & self.simulator.internal_memory.memory
+                                                        [pswloc])
+                                                    >> 3;
+                                                let val = count * 8 + reg.reg_count();
+                                                Some(
+                                                    self.simulator.internal_memory.memory
+                                                        [val as usize],
+                                                )
+                                            }
+                                            _ => None,
+                                        };
+                                        // swap the content
+                                        let op1 = self.simulator.internal_memory.memory
+                                            [Sim8051::sfr_addr(&self.simulator.accumulator)
+                                                as usize];
+                                        let op2 = self.simulator.internal_memory.memory
+                                            [addr.unwrap() as usize];
+                                        // swapping in a fancy style
+
+                                        // fk this borrow thing, my beautiful solution not working
+                                        // *op1ref = *op1ref + *op2ref;
+                                        // *op2ref = *op1ref;
+                                        // *op1ref = *op1ref - *op2ref;
+                                        self.simulator.internal_memory.memory
+                                            [addr.unwrap() as usize] = op1;
+                                        self.simulator.internal_memory.memory[Sim8051::sfr_addr(
+                                            &self.simulator.accumulator,
+                                        )
+                                            as usize] = op2;
+                                        success = true;
+                                    } else {
+                                        success = false;
+                                        println!("Invalid second operand to xch : {}", second);
+                                    }
                                 }
                             }
                             _ => success = false,

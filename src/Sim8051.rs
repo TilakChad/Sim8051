@@ -10,6 +10,7 @@ impl<'a> RegisterBank<'a> {
         self.ptr.iter_mut().for_each(|x| *x = 0);
     }
     pub fn show_registers(&self) {
+        // select active register bank first
         for i in 0..8 {
             println!("R{} -> {:#04x}", i, self.ptr[i]);
         }
@@ -50,6 +51,12 @@ impl InternalMemory {
         operator: fn(&mut Self, u8, u8),
     ) {
         operator(self, pos, bit);
+    }
+
+    pub fn get_bit_status_addr_memory(&mut self, pos: u8) -> bool {
+        let loc = 0x20 + pos / 8;
+        let rem = pos % 8;
+        (self.memory[loc as usize] & (1 << rem)) > 0
     }
 
     pub fn set_bit_addressable(&mut self, pos: u8, bit: u8) {
@@ -143,17 +150,29 @@ impl Sim8051 {
     }
 
     pub fn show_sfr_registers(&self) {
-        use SFR::*;
         use IRegs::*;
         use Ports::*;
+        use SFR::*;
         println!("\nShowing SFR contents :\n");
 
-        let vec = vec!(Reg(PSW),Reg(ACC),Reg(B), Port(P0),Port(P1),Port(P2),Port(P3));
-        let vecname = vec!("PSW ","A","B","P0","P1","P2","P3");
+        let vec = vec![
+            Reg(PSW),
+            Reg(ACC),
+            Reg(B),
+            Port(P0),
+            Port(P1),
+            Port(P2),
+            Port(P3),
+        ];
+        let vecname = vec!["PSW ", "A", "B", "P0", "P1", "P2", "P3"];
         let mapping = vec.iter().zip(vecname.iter());
 
-        for (val,name) in mapping {
-            println!("{:<10} -> {:#04x}",name,self.internal_memory.memory[sfr_addr(&val) as usize]);
+        for (val, name) in mapping {
+            println!(
+                "{:<10} -> {:#04x}",
+                name,
+                self.internal_memory.memory[sfr_addr(&val) as usize]
+            );
         }
     }
 }
@@ -253,48 +272,45 @@ impl Sim8051 {
     }
 
     // TODO :: Later
-    pub fn set_parity_bit(&mut self, val : u8) {
+    pub fn set_parity_bit(&mut self, val: u8) {
         // Don't ask what below code does :D -_-
-        let parity : u64 =
-            (((val as u64 * 0x0101010101010101 as u64) & 0x8040201008040201 as u64) % 0x1FF as u64) & (1 as u64);
+        let parity: u64 = (((val as u64 * 0x0101010101010101 as u64) & 0x8040201008040201 as u64)
+            % 0x1FF as u64)
+            & (1 as u64);
         let even_parity = parity == 0;
         // what's the bit count of PSW.7?
         let addr = sfr_addr(&self.psw);
         // retrieve its value, either set it or reset it
         if even_parity {
             self.internal_memory.memory[addr as usize] &= 0xFE;
-        }
-        else {
+        } else {
             self.internal_memory.memory[addr as usize] |= 0x01;
         }
     }
 
-    pub fn set_carry_bit(&mut self, set : bool){
+    pub fn set_carry_bit(&mut self, set: bool) {
         let addr = sfr_addr(&self.psw);
         if set {
             self.internal_memory.memory[addr as usize] |= 0x80;
-        }
-        else {
+        } else {
             self.internal_memory.memory[addr as usize] &= 0x7F;
         }
     }
 
-    pub fn set_auxiliary_carry_bit(&mut self, set : bool) {
+    pub fn set_auxiliary_carry_bit(&mut self, set: bool) {
         let addr = sfr_addr(&self.psw);
-        if set{
+        if set {
             self.internal_memory.memory[addr as usize] |= 0x40;
-        }
-        else {
+        } else {
             self.internal_memory.memory[addr as usize] &= 0xBF;
         }
     }
 
-    pub fn set_overflow_bit(&mut self,set : bool){
+    pub fn set_overflow_bit(&mut self, set: bool) {
         let addr = sfr_addr(&self.psw);
-        if set{
+        if set {
             self.internal_memory.memory[addr as usize] |= 0x04;
-        }
-        else {
+        } else {
             self.internal_memory.memory[addr as usize] &= 0xFB;
         }
     }

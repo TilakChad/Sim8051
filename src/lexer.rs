@@ -79,7 +79,7 @@ impl Tokenizer {
                         use std::str::FromStr;
                         Some(Token {
                             token: TokenType::IND(
-                                Sim8051::ScratchpadRegisters::from_str(&lexeme)
+                                Sim8051::ScratchpadRegisters::from_str(&lexeme[1..])
                                     .expect("Failed to match indirectable register"),
                             ),
                             len: 2,
@@ -424,43 +424,27 @@ pub fn string_handling() {
     }
 }
 
-pub fn retrieve_rvalue(sim :&mut Sim8051::Sim8051, token : &TokenType) -> Option<u8>{
+pub fn retrieve_rvalue(sim: &mut Sim8051::Sim8051, token: &TokenType) -> Option<u8> {
     use TokenType::*;
     match &token {
-        HEX(hex) => {
-            Some(sim.internal_memory.memory[*hex as usize])
-        }
+        HEX(hex) => Some(sim.internal_memory.memory[*hex as usize]),
         IMM(hex) => Some(*hex as u8),
         ID(reg) => {
             use std::str::FromStr;
             let reg = Sim8051::ScratchpadRegisters::from_str(reg.as_str())
                 .expect("Not a scratchpad register.. error");
             // Return its location depending upon the currently selected register bank
-            let pswloc =
-                Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
-                as usize;
-            let count =
-                (0x18 & sim.internal_memory.memory[pswloc]) >> 3;
+            let pswloc = Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW)) as usize;
+            let count = (0x18 & sim.internal_memory.memory[pswloc]) >> 3;
             let start = (count * 8) as usize;
-            Some(
-                sim.internal_memory.memory
-                                   [start + reg.reg_count() as usize],
-            )
+            Some(sim.internal_memory.memory[start + reg.reg_count() as usize])
         }
         // For indirect addressing, retrieve the value of the register to use as src location
         IND(reg) => {
-            let pswloc =
-                Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW))
-                as usize;
-            let count =
-                (0x18 & sim.internal_memory.memory[pswloc]) >> 3;
+            let pswloc = Sim8051::sfr_addr(&Sim8051::SFR::Reg(Sim8051::IRegs::PSW)) as usize;
+            let count = (0x18 & sim.internal_memory.memory[pswloc]) >> 3;
             let val = count * 8 + reg.reg_count();
-            Some(
-                sim.internal_memory.memory[sim
-                                           .internal_memory
-                                           .memory[val as usize]
-                                           as usize],
-            )
+            Some(sim.internal_memory.memory[sim.internal_memory.memory[val as usize] as usize])
         }
         _ => None,
     }
